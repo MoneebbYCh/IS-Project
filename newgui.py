@@ -4,6 +4,50 @@ from tkinter import ttk
 import generatekey
 import multiprocessing
 import worker
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+import secrets
+import binascii
+
+
+# Constants for key derivation
+SALT_SIZE = 16  # Size of the salt for PBKDF2
+KEY_LENGTH = 32  # AES-256 requires a 32-byte key
+ITERATIONS = 100000  # Number of iterations for PBKDF2
+
+def pad(data):
+    padding_length = AES.block_size - len(data) % AES.block_size
+    padding = bytes([padding_length] * padding_length)
+    return data + padding
+
+def derive_key(password):
+    """
+    Derives a 32-byte AES key from the provided password.
+    Uses PBKDF2 with a salt and high iteration count.
+    """
+    salt = secrets.token_bytes(SALT_SIZE)
+    key = PBKDF2(password, salt, dkLen=KEY_LENGTH, count=ITERATIONS)
+    return key, salt
+
+def encrypt_key_with_password(password, key):
+    """
+    Encrypts the provided AES key using a password-derived key.
+    Returns the encrypted key prefixed with an IV and the salt.
+    """
+    derived_key, salt = derive_key(password)
+    iv = secrets.token_bytes(AES.block_size)
+    cipher = AES.new(derived_key, AES.MODE_CBC, iv)
+    encrypted_key = iv + cipher.encrypt(pad(binascii.unhexlify(key)))
+    return encrypted_key, salt
+
+def save_encrypted_key_file(password, key, filepath):
+    """
+    Encrypts the key with the given password and saves it to a file with a .enc extension.
+    """
+    encrypted_key, salt = encrypt_key_with_password(password, key)
+    with open(filepath + "_key.enc", 'wb') as key_file:
+        key_file.write(salt + encrypted_key)
+
 
 class AESApp:
     def __init__(self, root):
@@ -79,6 +123,7 @@ class AESApp:
         self.key_entry_encrypt_file = tk.Entry(frame, width=64)
         self.key_entry_encrypt_file.grid(row=0, column=1, padx=5, pady=5)
 
+        # Add a button to generate a key
         self.generate_key_button_encrypt_file = tk.Button(frame, text="Generate Key", width=20, command=self.generate_key)
         self.generate_key_button_encrypt_file.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
 
@@ -93,6 +138,7 @@ class AESApp:
 
         self.progress_bar_encrypt_file = ttk.Progressbar(frame, orient='horizontal', length=400, mode='determinate')
         self.progress_bar_encrypt_file.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
+
 
     def create_decrypt_tab(self):
         self.decrypt_tab_control = ttk.Notebook(self.tab_decrypt)
@@ -190,6 +236,47 @@ class AESApp:
         else:
             messagebox.showerror("Error", "Please provide either text or choose a file for encryption, and ensure a key is provided.")
     
+    def save_encrypted_key(self):
+        key = self.key_entry_encrypt.get()
+        if not key:
+            messagebox.showerror("Error", "Please generate or enter a key before saving.")
+            return
+    
+        # Ask user for the save location
+        filepath = filedialog.asksaveasfilename(defaultextension=".enc", filetypes=[("Encrypted Key File", "*.enc")])
+        if filepath:
+            # Encrypt the key with the given password (key) and save it
+            save_encrypted_key_file(key, key, filepath)
+            messagebox.showinfo("Success", "Encrypted key saved successfully.")
+
+    def create_encrypt_text_tab(self):
+        frame = tk.Frame(self.tab_encrypt_text)
+        frame.pack(padx=10, pady=10)
+
+        tk.Label(frame, text="Encryption Key:").grid(row=0, column=0, padx=5, pady=5)
+        self.key_entry_encrypt = tk.Entry(frame, width=64)
+        self.key_entry_encrypt.grid(row=0, column=1, padx=5, pady=5)
+
+        self.generate_key_button_encrypt = tk.Button(frame, text="Generate Key", width=20, command=self.generate_key)
+        self.generate_key_button_encrypt.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+
+        tk.Label(frame, text="Text to Encrypt:").grid(row=2, column=0, padx=5, pady=5)
+        self.text_entry_encrypt = tk.Entry(frame, width=64)
+        self.text_entry_encrypt.grid(row=2, column=1, padx=5, pady=5)
+
+        self.encrypt_button_text = tk.Button(frame, text="Encrypt Text", width=20, command=self.encrypt_data)
+        self.encrypt_button_text.grid(row=3, column=0, columnspan=2, padx=5, pady=5)
+
+        self.save_encrypted_key_button = tk.Button(frame, text="Save Encrypted Key", width=20, command=self.save_encrypted_key)
+        self.save_encrypted_key_button.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
+
+        self.progress_bar_encrypt_text = ttk.Progressbar(frame, orient='horizontal', length=400, mode='determinate')
+        self.progress_bar_encrypt_text.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
+
+        tk.Label(frame, text="Encrypted Text:").grid(row=6, column=0, padx=5, pady=5)
+        self.encrypted_text_output = tk.Text(frame, width=64, height=10)
+        self.encrypted_text_output.grid(row=6, column=1, padx=5, pady=5)
+
     def decrypt_data(self):
         key = self.key_entry_decrypt.get()
         text = self.text_entry_decrypt.get().strip()
@@ -256,6 +343,19 @@ class AESApp:
             value = progress_queue.get()
             progress_bar['value'] = value
             self.root.update_idletasks()
+
+    def save_encrypted_key(self):
+        password = simpledialog.askstring("Password", "Enter a password to encrypt the key:", show='*')
+        if password and self.key:
+            try:
+                file_path = filedialog.asksaveasfilename(defaultextension=".enc", filetypes=[("Encrypted Key Files", "*.enc")])
+                if file_path:
+                    save_encrypted_key_file(password, self.key, file_path)
+                    messagebox.showinfo("Success", "Encrypted key saved successfully.")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        else:
+            messagebox.showwarning("Warning", "Please generate a key first.")
 
 if __name__ == "__main__":
     root = tk.Tk()
